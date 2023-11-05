@@ -1,0 +1,8 @@
+.idea/
+**/reports/
+**/data/
+**/slurm_logs/
+!**/src/data/
+__pycache__/
+.ipynb_checkpoints/
+
