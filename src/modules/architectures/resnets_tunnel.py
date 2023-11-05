@@ -223,7 +223,7 @@ class ResNet(nn.Module):
         x = self.avgpool(x)
         x = torch.flatten(x, 1)
         y = self.fc(x)
-        _ = yield x, y
+        _ = yield None, y
 
 
 def build_resnet(model_config, num_classes, dataset_name):
