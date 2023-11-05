@@ -13,7 +13,8 @@ from src.modules.metrics import acc_metric
 
 class SDN(torch.nn.Module):
     # assumption: wiem ile sieć ma możliwych wyjść i w których z nich chce dołączyć klasyfikatory, warstwy wewnętrzne to cnn
-    def __init__(self, backbone, criterion, ic_idxs, confidence_threshold, sample, nb_of_exits):
+    def __init__(self, backbone, criterion, ic_idxs, confidence_threshold, is_model_frozen, prob_conf, sample):
+        super().__init__()
         self.device = next(backbone.parameters()).device
         self.n_ics = len(ic_idxs)
         
@@ -21,15 +22,15 @@ class SDN(torch.nn.Module):
         self.criterion_ic = criterion
         self.ic_idxs = ic_idxs
         self.confidence_threshold = confidence_threshold
-        self.nb_of_exits = nb_of_exits
+        self.is_model_frozen = is_model_frozen
+        self.prob_conf = prob_conf
         
         self.attach_heads(sample=sample)
         
         
-        
     def attach_heads(self, sample):
-        assert all(idx < self.nb_of_exits - 1 for idx in self.ic_idxs), "Możemy doczepiać heady do wszystkich prócz ostatniego wyjścia"
-        fg = self._base_model.forward_generator(sample)
+        # assert all(idx < self.nb_of_exits - 1 for idx in self.ic_idxs), "Możemy doczepiać heady do wszystkich prócz ostatniego wyjścia"
+        fg = self.backbone.forward_generator(sample)
         input_dims = []
         
         i, x, y = 0, None, None
@@ -37,7 +38,7 @@ class SDN(torch.nn.Module):
             x, y = fg.send(x)
             if i in self.ic_idxs:
                 input_dims.append(x.size(1))
-            nb_of_exits += 1
+            i += 1
         
         num_classes = y.size(-1)
         self.nb_of_exits = i - 2  # "Możemy doczepiać heady do wszystkich prócz ostatniego wyjścia"
@@ -53,6 +54,8 @@ class SDN(torch.nn.Module):
             
         self.internal_classifiers = torch.nn.ModuleList([StandardHead(in_channels, num_classes=num_classes, pool_size=4)
             for in_channels in input_dims])
+        
+        self.ic_idxs += ['backbone_exit']
         
     # def run_train(self, x_true, y_true):
     #     '''
@@ -91,12 +94,13 @@ class SDN(torch.nn.Module):
         '''
         evaluators = defaultdict(float)
         logits = []
-        fg, repr_i = self.model.forward_generator(x_true), None
-        for i in range(self.ic_idxs):
-            if i not in self.attach_heads: continue
+        fg, repr_i, head_idx = self.backbone.forward_generator(x_true), None, 0
+        for i in range(self.nb_of_exits):
             repr_i, _ = fg.send(repr_i) # output of i-th layer of backbone
-            logit_i = self.branch_classifiers[i](repr_i)
+            if i not in self.ic_idxs: continue
+            logit_i = self.internal_classifiers[head_idx](repr_i)
             logits.append(logit_i)
+            head_idx += 1
 
         _, logit_main = fg.send(fg.send(repr_i)[0])
         logits.append(logit_main)
@@ -116,14 +120,16 @@ class SDN(torch.nn.Module):
     
     def run_val(self, x_true, y_true):
         # zbieraj confidence z tych które nie wyszły bo na końcu wybierzesz wyjście przy którym confidence był największy
-        fg, repr_i = self.model.forward_generator(x_true), None
+        fg, repr_i = self.backbone.forward_generator(x_true), None
         self.sample_exited_at = torch.zeros(x_true.size(0), dtype=torch.int) - 1
         self.sample_outputs = [torch.Tensor() for _ in range(x_true.size(0))]
+        self.max_confidences = torch.zeros(x_true.size(0), device=self.device) - 1
+        self.max_confidence_exits = torch.zeros(x_true.size(0), dtype=torch.int, device=self.device) - 1
         head_idx = 0
-        for i in range(self.ic_idxs):
-            if i not in self.attach_heads: continue
+        for i in range(self.nb_of_exits):
             repr_i, _ = fg.send(repr_i) # output of i-th layer of backbone
-            logit_i = self.branch_classifiers[i](repr_i) # head_output
+            if i not in self.ic_idxs: continue
+            logit_i = self.internal_classifiers[head_idx](repr_i) # head_output
             
             exit_mask_local = self.find_exit(logit_i, head_idx, is_last=False)
             head_idx += 1
@@ -143,41 +149,64 @@ class SDN(torch.nn.Module):
         acc = acc_metric(outputs, y_true)
 
         evaluators = defaultdict(float)
-        evaluators['overall_loss'] = ce_loss.item()
-        evaluators['overall_acc'] = acc
+        evaluators['internal_classifier_loss/overall_loss'] = ce_loss.item()
+        evaluators['internal_classifier_acc/overall_acc'] = acc
 
         return evaluators, self.sample_exited_at
     
     
     def find_exit(self, logit_i, head_idx, is_last):
+        '''
+        exit_mask_global (B): maska globalna, która mówi, które próbki już wyszły
+        exit_mask_local (B_pozostałe): maska lokalna, która mówi, które próbki wyszły w tym kroku
+        exit_mask_global_confidence: maska globalna, która mówi, które próbki nie wyszły w tym kroku, z tych które nie wyszły wcześniej
+        '''
         p_i = F.softmax(logit_i, dim=1)
         head_confidences_i = p_i.max(dim=-1)[0] if self.prob_conf else self.entropy_rate(p_i)
 
+        # na której pozycji w batchu nie ma jeszcze wyjścia
         unresolved_samples_mask = self.sample_exited_at == -1
         exit_mask_global = unresolved_samples_mask.clone()
+        exit_mask_global_confidence = unresolved_samples_mask.clone()
         exit_mask_local = (head_confidences_i >= self.confidence_threshold).cpu().squeeze(dim=-1)
         
         # Obsługa przypadku, gdy exit_mask_local jest skalarem
         if exit_mask_local.ndim == 0:
             exit_mask_local = torch.tensor([exit_mask_local.item()], device=logit_i.device)
             
+        # wskazuje pozostałe próbki które aktualnie nie wychodzą
+        exit_mask_global_confidence[unresolved_samples_mask] = ~exit_mask_local
+        head_confidences_i_lower = head_confidences_i[~exit_mask_local]
+        logit_i_lower = logit_i[~exit_mask_local]
+        # j-ta aktualnie przetwarzana próbka która nie wyszła, k-ta pozycja w batchu
+        for j, k in enumerate(exit_mask_global_confidence.nonzero().view(-1).tolist()):
+            if head_confidences_i_lower[j] > self.max_confidences[k]:
+                self.max_confidences[k] = head_confidences_i_lower[j]
+                self.max_confidence_exits[k] = head_idx
+                self.sample_outputs[k] = logit_i_lower[j]
+            
         # Aktualizacja globalnych indeksów wyjścia i zapisywanie logitów dla zaklasyfikowanych próbek
-        if not is_last:
-            exit_mask_global[unresolved_samples_mask] = exit_mask_local.to(exit_mask_global.device)
-            self.sample_exited_at[exit_mask_global] = head_idx
-            exit_indices_global = exit_mask_global.nonzero().view(-1).tolist()
-            exit_indices_local = exit_mask_local.nonzero().view(-1).tolist()
-            assert len(exit_indices_global) == len(exit_indices_local), \
-                f'exit_indices_global: {exit_indices_global} exit_indices_local: {exit_indices_local}'
-            for j, k in zip(exit_indices_global, exit_indices_local):
-                self.sample_outputs[j] = logit_i[k]
-        else:
-            exit_indices_global = exit_mask_global.nonzero().view(-1).tolist()
-            for j, k in enumerate(exit_indices_global):
-                self.sample_outputs[k] = logit_i[j]
+        # if not is_last:
+        # w masce globalnej wskazuje na pozycje które wyszły
+        exit_mask_global[unresolved_samples_mask] = exit_mask_local#.to(exit_mask_global.device)
+        self.sample_exited_at[exit_mask_global] = head_idx  # czy to ma być pozycja warstwy czy indeks heada?
+        exit_indices_global = exit_mask_global.nonzero().view(-1).tolist()
+        exit_indices_local = exit_mask_local.nonzero().view(-1).tolist()
+        assert len(exit_indices_global) == len(exit_indices_local), \
+            f'exit_indices_global: {exit_indices_global} exit_indices_local: {exit_indices_local}'
+        for j, k in zip(exit_indices_global, exit_indices_local):
+            self.sample_outputs[j] = logit_i[k]
+        # else:
+        if is_last:
+            unresolved_samples_mask = self.sample_exited_at == -1
+            self.sample_exited_at[unresolved_samples_mask] = self.max_confidence_exits[unresolved_samples_mask]
+            # exit_indices_global = exit_mask_global.nonzero().view(-1).tolist()
+            # for j, k in enumerate(exit_indices_global):
+            #     self.sample_outputs[k] = logit_i[j]
 
-            exit_mask_global[unresolved_samples_mask] = exit_mask_local
-            self.sample_exited_at[exit_mask_global] = head_idx
+            # # jako -1 zostają te które nie wyszły w ostatnim przez confidence
+            # exit_mask_global[unresolved_samples_mask] = exit_mask_local
+            # self.sample_exited_at[exit_mask_global] = head_idx
 
         return exit_mask_local
     
