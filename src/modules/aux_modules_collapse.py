@@ -1,6 +1,7 @@
 from collections import defaultdict
 
 import numpy as np
+from scipy.linalg import eigh
 import torch
 
 
@@ -96,16 +97,16 @@ def variance_eucl(x_data, y_true, evaluators):
         # evaluators[f'between_cov_rank/{name}'] = rank_bcc.item()
         # evaluators[f'total_cov_rank/{name}'] = rank_tcc.item()
         
-        A = within_class_cov.T @ within_class_cov
-        square_stable_rank_wcc = torch.trace(A) / torch.lobpcg(A, k=1)[0][0]
-        B = between_class_cov.T @ between_class_cov
-        square_stable_rank_bcc = torch.trace(B) / torch.lobpcg(B, k=1)[0][0]
-        C = total_class_cov.T @ total_class_cov
-        square_stable_rank_tcc = torch.trace(C) / torch.lobpcg(C, k=1)[0][0]
+        # A = within_class_cov.T @ within_class_cov
+        # square_stable_rank_wcc = torch.trace(A) #/ eigh(A.detach().cpu().numpy(), subset_by_index=[1, 1], eigvals_only=True)[0]#torch.lobpcg(A, k=1)[0][0]
+        # B = between_class_cov.T @ between_class_cov
+        # square_stable_rank_bcc = torch.trace(B) #/ eigh(B.detach().cpu().numpy(), subset_by_index=[1, 1], eigvals_only=True)[0]#torch.lobpcg(B, k=1)[0][0]
+        # C = total_class_cov.T @ total_class_cov
+        # square_stable_rank_tcc = torch.trace(C) #/ eigh(C.detach().cpu().numpy(), subset_by_index=[1, 1], eigvals_only=True)[0]#torch.lobpcg(C, k=1)[0][0]
         
-        evaluators[f'within_cov_square_stable_rank/{name}'] = square_stable_rank_wcc.item()
-        evaluators[f'between_cov_square_stable_rank/{name}'] = square_stable_rank_bcc.item()
-        evaluators[f'total_cov_square_stable_rank/{name}'] = square_stable_rank_tcc.item()
+        # evaluators[f'within_cov_square_stable_rank/{name}'] = square_stable_rank_wcc.item()
+        # evaluators[f'between_cov_square_stable_rank/{name}'] = square_stable_rank_bcc.item()
+        # evaluators[f'total_cov_square_stable_rank/{name}'] = square_stable_rank_tcc.item()
 
 
 import torch

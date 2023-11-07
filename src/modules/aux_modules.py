@@ -2,6 +2,7 @@ from collections import defaultdict
 from copy import deepcopy
 
 import numpy as np
+from scipy.linalg import eigh
 import torch
 from torch.distributions import Categorical
 
@@ -37,7 +38,7 @@ class TunnelandProbing(torch.nn.Module):
         x_test = torch.cat([x for x, _ in self.loaders[DATASET_NAME]], dim=0).to(self.device)
         y_test = torch.cat([y for _, y in self.loaders[DATASET_NAME]], dim=0).to(self.device)
         with torch.no_grad():
-            _ = self.model(x_test)
+            self.model(x_test)
         internal_representations_test = self.hooks_reprs.get_assets()  # (B, D)
         self.hooks_reprs.reset()
         evaluators = {}
@@ -62,7 +63,7 @@ class TunnelandProbing(torch.nn.Module):
         # probe layers
         # accs_epoch = []
         # losses_epoch = []
-        # self.model.train()
+        self.model.train()
         # for _ in range(self.epochs_probing): # ustalić warunek stopu zbieżności głowic
         #     self.train_heads(vmap_heads, params, buffers) # train
         #     # self.train_heads(vmap_heads) # train
@@ -110,7 +111,7 @@ class TunnelandProbing(torch.nn.Module):
         matrix = matrix.T if is_batch_first else matrix  # if batch first then transpose to get features
         gramian_matrix = matrix @ matrix.T
         rank = torch.linalg.matrix_rank(gramian_matrix).item()
-        square_stable_rank = (torch.diag(gramian_matrix).sum()).item() / (torch.lobpcg(gramian_matrix, k=1)[0][0]).item()
+        square_stable_rank = 0#torch.trace(gramian_matrix).item() #/ eigh(gramian_matrix.detach().cpu().numpy(), subset_by_index=[1, 1], eigvals_only=True)[0] #(torch.lobpcg(gramian_matrix, k=1)[0][0]).item()
         return rank, square_stable_rank
     
     # def calculate_rank_via_svd(self, transpose, matrix):

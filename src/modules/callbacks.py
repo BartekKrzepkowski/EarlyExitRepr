@@ -70,7 +70,7 @@ class GatherRepresentationsCallback:
                 self.subsampling[name] = torch.randperm(output.size(1))[:self.cutoff].sort()[0]
                 output = self.adjust_representation(output, name)
             
-            self.representations[name] = output
+            self.representations[name] = output.detach()
             self.idx += 1
             
     def adjust_representation(self, representation, name):
