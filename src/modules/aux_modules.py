@@ -391,6 +391,43 @@ class TraceFIM(torch.nn.Module):
         evaluators['steps/trace_fim'] = step
         self.model.train()
         self.logger.log_scalars(evaluators, step)
+
+
+class TraceFIMsimpler(torch.nn.Module):
+    def __init__(self, x_held_out, model, criterion, num_classes):
+        super().__init__()
+        self.device = next(model.parameters()).device
+        self.x_held_out = x_held_out
+        self.model = model
+        self.criterion = criterion
+        self.penalized_parameter_names = get_every_but_forbidden_parameter_names(self.model, FORBIDDEN_LAYER_TYPES)
+        print("penalized_parameter_names: ", self.penalized_parameter_names)
+        self.labels = torch.arange(num_classes).to(self.device)
+        self.logger = None
+
+    def forward(self, y_pred):
+        self.model.eval()
+        y_sampled = Categorical(logits=y_pred).sample()
+        loss = self.criterion(y_pred, y_sampled)
+        params_names, params = zip(*[(n, p) for n, p in self.model.named_parameters() if p.requires_grad])
+        grads = torch.autograd.grad(
+            loss,
+            params,
+            retain_graph=True,
+            create_graph=True)
+        evaluators = defaultdict(float)
+        overall_trace = 0.0
+        for param_name, gr in zip(params_names, grads):
+            if gr is not None:
+                trace_p = (gr**2).sum()
+                traces[param_name] += trace_p.item()
+                if param_name in self.penalized_parameter_names:
+                    overall_trace += trace_p
+                    
+        valuators[f'trace_fim/overall_trace'] = overall_trace
+        evaluators['steps/trace_fim'] = step
+        self.model.train()
+        self.logger.log_scalars(evaluators, step)
         
         
 class TraceFIMbackup(torch.nn.Module):
