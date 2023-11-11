@@ -236,7 +236,7 @@ class TrainerClassification:
                 tunnel_multi = config.tunnel_multi# if self.epoch > 5 else ((config.tunnel_multi // 20) if self.epoch > 0 else (config.tunnel_multi // 80))# make it more well thought
                 if self.extra_modules['tunnel_code'] is not None and tunnel_multi and self.global_step % tunnel_multi == 0:
                     self.timer.start('tunnel_code')
-                    self.extra_modules['tunnel_code'](self.global_step, scope='periodic', phase='train')
+                    self.extra_modules['tunnel_code'].analysis(self.global_step, scope='periodic', phase='train')
                     self.timer.stop('tunnel_code')
 
                 # Similar to tunnel_multi, adjust the frequency of tunnel_grads operations

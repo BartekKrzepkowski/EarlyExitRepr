@@ -1,4 +1,5 @@
 import os
+import logging
 from abc import abstractmethod
 
 import numpy as np
@@ -79,7 +80,9 @@ class RepresentationsSpectra(BaseAnalysis):
         prefix = 'ranks_representations'
         postfix = f'____{scope}____{phase}'
         if len(self.representations) == 0:
+            logging.info(f'Number of matrices: {9991}')
             self.collect_representations()
+        logging.info(f'Number of matrices: {9992}')
         evaluators = {}
         for name, rep in self.representations.items():
             name_dict = f'{prefix}/{name}{postfix}'
