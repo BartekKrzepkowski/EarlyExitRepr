@@ -21,6 +21,7 @@ from src.modules.hooks import Hooks
 from src.modules.aux_modules import TunnelandProbing, TraceFIM
 from src.modules.aux_modules_collapse import TunnelGrad
 from src.modules.metrics import RunStats
+from src.modules.tunnel_code import RepresentationsSpectra
 
 
 def objective(exp, epochs, lr, wd, lr_lambda):
@@ -79,7 +80,7 @@ def objective(exp, epochs, lr, wd, lr_lambda):
     
     
     LR = lr
-    MOMENTUM = 0.0
+    MOMENTUM = 0.9
     WD = wd
     LR_LAMBDA = lr_lambda
     T_max = len(loaders['train']) * epochs
@@ -124,13 +125,15 @@ def objective(exp, epochs, lr, wd, lr_lambda):
     
     
     extra_modules = defaultdict(lambda: None)
-    extra_modules['hooks_reprs'] = Hooks(model, logger=None, callback_type='gather_reprs', kwargs_callback={"cutoff": 4000})
-    extra_modules['hooks_reprs'].register_hooks([torch.nn.Conv2d, torch.nn.Linear])
+    # extra_modules['hooks_reprs'] = Hooks(model, logger=None, callback_type='gather_reprs', kwargs_callback={"cutoff": 8000})
+    # extra_modules['hooks_reprs'].register_hooks([torch.nn.Conv2d, torch.nn.Linear])
     
-    extra_modules['run_stats'] = RunStats(model, optim)
+    # extra_modules['run_stats'] = RunStats(model, optim)
     
-    extra_modules['tunnel'] = TunnelandProbing(loaders, model, num_classes=NUM_CLASSES, optim_type=type_names['optim'], optim_params={'lr': 1e-2, 'weight_decay': 0.0},
-                                               reprs_hook=extra_modules['hooks_reprs'], epochs_probing=50)
+    extra_modules['tunnel_code'] = RepresentationsSpectra(model, loader=loaders['test'])
+    
+    # extra_modules['tunnel'] = TunnelandProbing(loaders, model, num_classes=NUM_CLASSES, optim_type=type_names['optim'], optim_params={'lr': 1e-2, 'weight_decay': 0.0},
+    #                                            reprs_hook=extra_modules['hooks_reprs'], epochs_probing=50)
     
     # extra_modules['tunnel_grads'] = TunnelGrad(loaders, model, cutoff=4000)
     # extra_modules['trace_fim'] = TraceFIM(held_out['x_held_out'], model, num_classes=NUM_CLASSES)
@@ -206,7 +209,7 @@ def objective(exp, epochs, lr, wd, lr_lambda):
 
 if __name__ == "__main__":
     lr = float(sys.argv[1])
-    wd = 0.0#1e-4 * 1e-1 / lr
+    wd = 1e-3 * 1e-1 / lr
     lr_lambda = 1.0
     EPOCHS = 300
     objective('just_run', EPOCHS, lr, wd, lr_lambda)

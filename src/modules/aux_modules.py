@@ -1,9 +1,10 @@
+import logging
 from collections import defaultdict
 from copy import deepcopy
 
 import numpy as np
-from scipy.linalg import eigh
 import torch
+from scipy.linalg import eigh
 from torch.distributions import Categorical
 
 from src.utils import prepare
@@ -49,7 +50,7 @@ class TunnelandProbing(torch.nn.Module):
         evaluators = self.prepare_and_calculate_ranks(internal_representations_test, evaluators, prefix=f'ranks_representations', postfix=postfix)
         evaluators = self.prepare_and_calculate_ranks(named_weights, evaluators, prefix=f'ranks_weights', postfix=postfix)
         
-        variance_eucl(internal_representations_test, y_test, evaluators)
+        # variance_eucl(internal_representations_test, y_test, evaluators)
         
         # # prepare heads
         # input_dims = [representation.size(1) for representation in internal_representations_test]
@@ -86,9 +87,11 @@ class TunnelandProbing(torch.nn.Module):
         # matrices = matrices.to(self.device)
         # matrices = torch.nested.nested_tensor(list(matrices))
         is_batch_first = False if 'weight' in prefix else True
-        
+        logging.info(f'Number of matrices: {len(matrices)}')
         # ranks = self.vmap_ranks(transpose, matrices)
         for name, matrix in matrices.items():
+            # matrix = matrix.detach().cpu().data
+            logging.info(f'Matrix shape {name}: {matrix.shape}')
             ranks = self.calculate_rank(is_batch_first, matrix)
             denom = matrix.T.size(0) if is_batch_first else matrix.size(0)
             

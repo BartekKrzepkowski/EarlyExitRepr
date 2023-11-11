@@ -1,5 +1,6 @@
 from collections import defaultdict
 
+import numpy as np
 import torch
 # czy w papierze chodziło o stale martwe neurony?
 class DeadActivationCallback:
@@ -67,14 +68,15 @@ class GatherRepresentationsCallback:
             if name in self.subsampling:
                 output = self.adjust_representation(output, name)
             elif output.size(1) > self.cutoff:
-                self.subsampling[name] = torch.randperm(output.size(1))[:self.cutoff].sort()[0]
+                self.subsampling[name] = np.random.choice(output.size(1), self.cutoff, replace=False)  # torch.randperm(output.size(1))[:self.cutoff].sort()[0]
                 output = self.adjust_representation(output, name)
             
-            self.representations[name] = output.detach()
+            self.representations[name] = output.detach().cpu()
             self.idx += 1
             
     def adjust_representation(self, representation, name):
-        representation = torch.index_select(representation, 1, self.subsampling[name].to(self.device))
+        # representation = torch.index_select(representation, 1, self.subsampling[name].to(self.device))
+        representation =representation[:, self.subsampling[name]]
         return representation
     
     def get_assets(self):

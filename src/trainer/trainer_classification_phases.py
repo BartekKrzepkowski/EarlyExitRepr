@@ -142,6 +142,8 @@ class TrainerClassification:
             self.extra_modules['hooks_acts'].logger = self.logger
         if 'tunnel' in self.extra_modules:
             self.extra_modules['tunnel'].logger = self.logger
+        if 'tunnel_code' in self.extra_modules:
+            self.extra_modules['tunnel_code'].logger = self.logger
         if 'tunnel_grads' in self.extra_modules:
             self.extra_modules['tunnel_grads'].logger = self.logger
         if 'trace_fim' in self.extra_modules:
@@ -221,19 +223,25 @@ class TrainerClassification:
                 
                 # Adjust the frequency of tunnel operations based on the current epoch
                 # This is to gradually change the frequency of tunnel operations
-                tunnel_multi = config.tunnel_multi if self.epoch > 5 else ((config.tunnel_multi // 20) if self.epoch > 0 else (config.tunnel_multi // 80))# make it more well thought
-                if self.extra_modules['tunnel'] is not None and tunnel_multi and self.global_step % tunnel_multi == 0:
-                    froze_model(self.model, False)
-                    self.extra_modules['hooks_reprs'].enable()
-                    self.timer.start('tunnel')
-                    self.extra_modules['tunnel'](self.global_step, scope='periodic', phase='train')
-                    self.timer.stop('tunnel')
-                    self.extra_modules['hooks_reprs'].disable()
-                    froze_model(self.model, True)
+                # tunnel_multi = config.tunnel_multi# if self.epoch > 5 else ((config.tunnel_multi // 20) if self.epoch > 0 else (config.tunnel_multi // 80))# make it more well thought
+                # if self.extra_modules['tunnel'] is not None and tunnel_multi and self.global_step % tunnel_multi == 0:
+                #     froze_model(self.model, False)
+                #     self.extra_modules['hooks_reprs'].enable()
+                #     self.timer.start('tunnel')
+                #     self.extra_modules['tunnel'](self.global_step, scope='periodic', phase='train')
+                #     self.timer.stop('tunnel')
+                #     self.extra_modules['hooks_reprs'].disable()
+                #     froze_model(self.model, True)
+                    
+                tunnel_multi = config.tunnel_multi# if self.epoch > 5 else ((config.tunnel_multi // 20) if self.epoch > 0 else (config.tunnel_multi // 80))# make it more well thought
+                if self.extra_modules['tunnel_code'] is not None and tunnel_multi and self.global_step % tunnel_multi == 0:
+                    self.timer.start('tunnel_code')
+                    self.extra_modules['tunnel_code'](self.global_step, scope='periodic', phase='train')
+                    self.timer.stop('tunnel_code')
 
                 # Similar to tunnel_multi, adjust the frequency of tunnel_grads operations
                 tunnel_grads_multi = config.tunnel_grads_multi if self.epoch > 5 else ((config.tunnel_grads_multi // 20) if self.epoch > 0 else (config.tunnel_grads_multi // 80))# make it more well thought
-                if tunnel_multi and self.global_step % tunnel_grads_multi == 0 and self.extra_modules['tunnel_grads'] is not None:
+                if self.extra_modules['tunnel_grads'] is not None and tunnel_multi and self.global_step % tunnel_grads_multi == 0:
                     self.timer.start('tunnel_grads')
                     self.extra_modules['tunnel_grads'](self.global_step, scope='periodic', phase='train')
                     self.timer.stop('tunnel_grads')

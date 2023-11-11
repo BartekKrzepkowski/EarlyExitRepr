@@ -49,14 +49,15 @@ def variance_angle_pairwise(x_data, y_true, evaluators): # zamiast cos do średn
 
 def variance_eucl(x_data, y_true, evaluators):
     eps = torch.finfo(torch.float32).eps
-    classes = np.unique(y_true.cpu().numpy())
+    y_true = y_true.cpu()
+    classes = np.unique(y_true.numpy())
     denom_class = classes.shape[0]
     for name, internal_repr in x_data.items():
         within_class_cov = 0.0
         between_class_cov = 0.0
-        general_mean = torch.mean(internal_repr, dim=0, keepdim=True).detach()  # (1, D)
+        general_mean = torch.mean(internal_repr, dim=0, keepdim=True)  # (1, D)
         for c in classes:
-            class_internal_repr = internal_repr[y_true == c].detach()  # (N_c, D)
+            class_internal_repr = internal_repr[y_true == c]  # (N_c, D)
             class_mean = torch.mean(class_internal_repr, dim=0, keepdim=True)  # (1, D)
             class_internal_repr_sub = class_internal_repr - class_mean  # (N_c, D)
             # print(class_internal_repr_sub.shape)
