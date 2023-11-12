@@ -1,3 +1,4 @@
+import logging
 from collections import defaultdict
 
 import numpy as np
@@ -108,12 +109,12 @@ class SDN(torch.nn.Module):
         loss_overall = 0.0
         for i, logit_i in enumerate(logits):
             losses_i = self.criterion_ic(logit_i, y_true)
-            evaluators[f'internal_classifier_loss/{self.ic_idxs[i]}'] = losses_i[1]['loss']
-            evaluators[f'internal_classifier_acc/{self.ic_idxs[i]}'] = losses_i[1]['acc']
+            evaluators[f'internal_classifier_loss/{self.ic_idxs[i]}____{"train"}'] = losses_i[1]['loss']
+            evaluators[f'internal_classifier_acc/{self.ic_idxs[i]}____{"train"}'] = losses_i[1]['acc']
             loss_overall += 0 if ((i + 1) == len(logits) and self.is_model_frozen) else losses_i[0]
 
-        evaluators['internal_classifier_loss/overall_loss'] = loss_overall.item()
-        evaluators['internal_classifier_acc/overall_acc'] = evaluators[f'internal_classifier_acc/{self.ic_idxs[i]}']
+        evaluators[f'internal_classifier_loss/overall_loss____{"train"}'] = loss_overall.item()
+        evaluators[f'internal_classifier_acc/overall_acc____{"train"}'] = evaluators[f'internal_classifier_acc/{self.ic_idxs[i]}']
 
         return loss_overall, evaluators
     
@@ -121,10 +122,10 @@ class SDN(torch.nn.Module):
     def run_val(self, x_true, y_true):
         # zbieraj confidence z tych które nie wyszły bo na końcu wybierzesz wyjście przy którym confidence był największy
         fg, repr_i = self.backbone.forward_generator(x_true), None
-        self.sample_exited_at = torch.zeros(x_true.size(0), dtype=torch.int) - 1
         self.sample_outputs = [torch.Tensor() for _ in range(x_true.size(0))]
-        self.max_confidences = torch.zeros(x_true.size(0), device=self.device) - 1
-        self.max_confidence_exits = torch.zeros(x_true.size(0), dtype=torch.int, device=self.device) - 1
+        self.sample_exited_at = torch.zeros(x_true.size(0), dtype=torch.int) - 1
+        self.max_confidence_exits = torch.zeros(x_true.size(0), dtype=torch.int) - 1
+        self.max_confidences = torch.zeros(x_true.size(0)) - 1
         head_idx = 0
         for i in range(self.nb_of_exits):
             repr_i, _ = fg.send(repr_i) # output of i-th layer of backbone
@@ -149,8 +150,8 @@ class SDN(torch.nn.Module):
         # acc = acc_metric(outputs, y_true)
 
         evaluators = defaultdict(float)
-        evaluators['internal_classifier_loss/overall_loss'] = losses[1]['loss']
-        evaluators['internal_classifier_acc/overall_acc'] = losses[1]['acc']
+        evaluators[f'internal_classifier_loss/overall_loss____{"test"}'] = losses[1]['loss']
+        evaluators[f'internal_classifier_acc/overall_acc____{"test"}'] = losses[1]['acc']
 
         return evaluators, self.sample_exited_at
     
@@ -198,6 +199,7 @@ class SDN(torch.nn.Module):
             self.sample_outputs[j] = logit_i[k]
         # else:
         if is_last:
+            # logging(f"devices: {self.sample_exited_at.device.type}, {self.max_confidence_exits.device.type}, {unresolved_samples_mask.device.type}")
             unresolved_samples_mask = self.sample_exited_at == -1
             self.sample_exited_at[unresolved_samples_mask] = self.max_confidence_exits[unresolved_samples_mask]
             # exit_indices_global = exit_mask_global.nonzero().view(-1).tolist()
