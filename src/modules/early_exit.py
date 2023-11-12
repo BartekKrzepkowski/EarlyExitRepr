@@ -107,10 +107,10 @@ class SDN(torch.nn.Module):
 
         loss_overall = 0.0
         for i, logit_i in enumerate(logits):
-            ce_loss_i = self.criterion_ic(logit_i, y_true)
-            evaluators[f'internal_classifier_loss/{self.ic_idxs[i]}'] = ce_loss_i.item()
-            evaluators[f'internal_classifier_acc/{self.ic_idxs[i]}'] = acc_metric(logit_i, y_true)
-            loss_overall += 0 if ((i + 1) == len(logits) and self.is_model_frozen) else ce_loss_i
+            losses_i = self.criterion_ic(logit_i, y_true)
+            evaluators[f'internal_classifier_loss/{self.ic_idxs[i]}'] = losses_i[1]['loss']
+            evaluators[f'internal_classifier_acc/{self.ic_idxs[i]}'] = losses_i[1]['acc']
+            loss_overall += 0 if ((i + 1) == len(logits) and self.is_model_frozen) else losses_i[0]
 
         evaluators['internal_classifier_loss/overall_loss'] = loss_overall.item()
         evaluators['internal_classifier_acc/overall_acc'] = evaluators[f'internal_classifier_acc/{self.ic_idxs[i]}']
@@ -145,12 +145,12 @@ class SDN(torch.nn.Module):
             _ = self.find_exit(output_main_head, head_idx, is_last=True)
 
         outputs = torch.stack(self.sample_outputs).to(self.device)
-        ce_loss = self.criterion_ic(outputs, y_true)
-        acc = acc_metric(outputs, y_true)
+        losses = self.criterion_ic(outputs, y_true)
+        # acc = acc_metric(outputs, y_true)
 
         evaluators = defaultdict(float)
-        evaluators['internal_classifier_loss/overall_loss'] = ce_loss.item()
-        evaluators['internal_classifier_acc/overall_acc'] = acc
+        evaluators['internal_classifier_loss/overall_loss'] = losses[1]['loss']
+        evaluators['internal_classifier_acc/overall_acc'] = losses[1]['acc']
 
         return evaluators, self.sample_exited_at
     
