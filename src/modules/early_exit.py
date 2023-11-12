@@ -13,7 +13,7 @@ from src.modules.metrics import acc_metric
 
 class SDN(torch.nn.Module):
     # assumption: wiem ile sieć ma możliwych wyjść i w których z nich chce dołączyć klasyfikatory, warstwy wewnętrzne to cnn
-    def __init__(self, backbone, criterion, ic_idxs, confidence_threshold, is_model_frozen, prob_conf, sample):
+    def __init__(self, backbone, criterion, ic_idxs, confidence_threshold, sample, is_model_frozen: bool, prob_conf: bool):
         super().__init__()
         self.device = next(backbone.parameters()).device
         self.n_ics = len(ic_idxs)
@@ -25,7 +25,7 @@ class SDN(torch.nn.Module):
         self.is_model_frozen = is_model_frozen
         self.prob_conf = prob_conf
         
-        self.attach_heads(sample=sample)
+        self.attach_heads(sample=sample.to(self.device))
         
         
     def attach_heads(self, sample):
@@ -53,7 +53,7 @@ class SDN(torch.nn.Module):
         # num_classes = logit_main.size(-1)
             
         self.internal_classifiers = torch.nn.ModuleList([StandardHead(in_channels, num_classes=num_classes, pool_size=4)
-            for in_channels in input_dims])
+            for in_channels in input_dims]).to(self.device)
         
         self.ic_idxs += ['backbone_exit']
         
@@ -168,7 +168,7 @@ class SDN(torch.nn.Module):
         unresolved_samples_mask = self.sample_exited_at == -1
         exit_mask_global = unresolved_samples_mask.clone()
         exit_mask_global_confidence = unresolved_samples_mask.clone()
-        exit_mask_local = (head_confidences_i >= self.confidence_threshold).cpu().squeeze(dim=-1)
+        exit_mask_local = (head_confidences_i >= self.confidence_threshold).cpu().detach().squeeze(dim=-1)
         
         # Obsługa przypadku, gdy exit_mask_local jest skalarem
         if exit_mask_local.ndim == 0:
@@ -213,3 +213,6 @@ class SDN(torch.nn.Module):
     
     def entropy_rate(self, p):
         return 1 + torch.sum(p * torch.log(p), dim=1) / np.log(p.size(-1))
+    
+    # def forward(self, x):
+    #     pass

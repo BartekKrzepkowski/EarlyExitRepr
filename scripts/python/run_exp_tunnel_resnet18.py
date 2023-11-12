@@ -24,7 +24,7 @@ from src.modules.metrics import RunStats
 from src.modules.tunnel_code import RepresentationsSpectra
 
 
-def objective(exp, epochs, lr, wd, lr_lambda):
+def objective(exp, epochs, lr, wd, momentum, lr_lambda):
     # ════════════════════════ prepare general params ════════════════════════ #
 
 
@@ -80,7 +80,7 @@ def objective(exp, epochs, lr, wd, lr_lambda):
     
     
     LR = lr
-    MOMENTUM = 0.9
+    MOMENTUM = momentum
     WD = wd
     LR_LAMBDA = lr_lambda
     T_max = len(loaders['train']) * epochs
@@ -130,7 +130,7 @@ def objective(exp, epochs, lr, wd, lr_lambda):
     
     # extra_modules['run_stats'] = RunStats(model, optim)
     
-    extra_modules['tunnel_code'] = RepresentationsSpectra(model, loader=loaders['test'])
+    extra_modules['tunnel_code'] = RepresentationsSpectra(model, loader=loaders['test'], modules_list=[torch.nn.Conv2d, torch.nn.Linear], MAX_REPR_SIZE=8000)
     
     # extra_modules['tunnel'] = TunnelandProbing(loaders, model, num_classes=NUM_CLASSES, optim_type=type_names['optim'], optim_params={'lr': 1e-2, 'weight_decay': 0.0},
     #                                            reprs_hook=extra_modules['hooks_reprs'], epochs_probing=50)
@@ -177,12 +177,11 @@ def objective(exp, epochs, lr, wd, lr_lambda):
     
     config.log_multi = 1#(T_max // epochs) // 10
     config.save_multi = int((T_max // epochs) * 20)
-    # config.stiff_multi = (T_max // (window + epochs)) // 2
     config.run_stats_multi = (T_max // epochs) // 2
     config.tunnel_multi = int((T_max // epochs) * 10)
     config.tunnel_grads_multi = int((T_max // epochs) * 10)
     config.fim_trace_multi = (T_max // epochs) // 2
-    config.run_stats_multi = (T_max // epochs) // 2
+    # config.stiff_multi = (T_max // (window + epochs)) // 2
     
     config.clip_value = CLIP_VALUE
     config.random_seed = RANDOM_SEED
@@ -209,7 +208,9 @@ def objective(exp, epochs, lr, wd, lr_lambda):
 
 if __name__ == "__main__":
     lr = float(sys.argv[1])
-    wd = 1e-3 * 1e-1 / lr
+    momentum = float(sys.argv[2])
+    is_wd = int(sys.argv[3])
+    wd = 1e-4 * 1e-1 / lr * is_wd
     lr_lambda = 1.0
     EPOCHS = 300
-    objective('just_run', EPOCHS, lr, wd, lr_lambda)
+    objective('just_run', EPOCHS, lr, wd, momentum, lr_lambda)

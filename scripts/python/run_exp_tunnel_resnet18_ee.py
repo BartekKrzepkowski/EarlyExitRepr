@@ -15,16 +15,17 @@ import omegaconf
 from src.utils.prepare import prepare_model, prepare_loaders, prepare_criterion, prepare_optim_and_scheduler
 from src.utils.utils_trainer import manual_seed
 from src.utils.utils_visualisation import ee_tensorboard_layout
-from src.trainer.trainer_classification_phases import TrainerClassification
+from src.trainer.trainer_classification_ee import TrainerClassification
 
 from src.modules.hooks import Hooks
 from src.modules.aux_modules import TunnelandProbing, TraceFIM
 from src.modules.aux_modules_collapse import TunnelGrad
 from src.modules.metrics import RunStats
+from src.modules.tunnel_code import RepresentationsSpectra
 from src.modules.early_exit import SDN
 
 
-def objective(exp, epochs, lr, wd, lr_lambda):
+def objective(exp, epochs, lr, wd, momentum, lr_lambda):
     # ════════════════════════ prepare general params ════════════════════════ #
 
 
@@ -80,7 +81,7 @@ def objective(exp, epochs, lr, wd, lr_lambda):
     
     
     LR = lr
-    MOMENTUM = 0.0
+    MOMENTUM = momentum
     WD = wd
     LR_LAMBDA = lr_lambda
     T_max = len(loaders['train']) * epochs
@@ -92,7 +93,7 @@ def objective(exp, epochs, lr, wd, lr_lambda):
     
     # ════════════════════════ prepare wandb params ════════════════════════ #
     
-    quick_name = 'phase2'
+    quick_name = 'early_exit_sdn'
     ENTITY_NAME = 'gmum'
     PROJECT_NAME = 'NeuralCollapse'
     GROUP_NAME = f'{exp}, {type_names["optim"]}, {type_names["dataset"]}, {type_names["model"]}_lr_{LR}_momentum_{MOMENTUM}_wd_{WD}_lr_lambda_{LR_LAMBDA}'
@@ -117,21 +118,23 @@ def objective(exp, epochs, lr, wd, lr_lambda):
     print("device", device)
     held_out = {}
     data = '/net/pr2/projects/plgrid/plgg_ccbench/data'
-    held_out['x_held_out'] = torch.load(f'{data}/{type_names["dataset"]}_held_out_proper_x.pt').to(device)
+    # held_out['x_held_out'] = torch.load(f'{data}/{type_names["dataset"]}_held_out_proper_x.pt').to(device)
     # held_out['y_held_out'] = torch.load(f'{data}/{type_names["dataset"]}_held_out_proper_y.pt').to(device)
     
     
     # ════════════════════════ prepare extra modules ════════════════════════ #
     
-    model = SDN(model, criterion=criterion, ic_idxs=[0,1,2,3,4,5,6], confidence_threshold=0.8, sample=next(iter(loaders['train']))[0])
+    model = SDN(model, criterion=criterion, ic_idxs=[0,1,2,3,4,5,6], confidence_threshold=0.8, is_model_frozen=False, prob_conf=True, sample=next(iter(loaders['train']))[0])
     extra_modules = defaultdict(lambda: None)
-    extra_modules['hooks_reprs'] = Hooks(model, logger=None, callback_type='gather_reprs', kwargs_callback={"cutoff": 4000})
-    extra_modules['hooks_reprs'].register_hooks([torch.nn.Conv2d, torch.nn.Linear])
+    # extra_modules['hooks_reprs'] = Hooks(model, logger=None, callback_type='gather_reprs', kwargs_callback={"cutoff": 4000})
+    # extra_modules['hooks_reprs'].register_hooks([torch.nn.Conv2d, torch.nn.Linear])
     
-    extra_modules['run_stats'] = RunStats(model, optim)
+    # extra_modules['run_stats'] = RunStats(model, optim)
     
-    extra_modules['tunnel'] = TunnelandProbing(loaders, model, num_classes=NUM_CLASSES, optim_type=type_names['optim'], optim_params={'lr': 1e-2, 'weight_decay': 0.0},
-                                               reprs_hook=extra_modules['hooks_reprs'], epochs_probing=50)
+    # extra_modules['tunnel_code'] = RepresentationsSpectra(model, loader=loaders['test'], modules_list=[torch.nn.Conv2d, torch.nn.Linear], MAX_REPR_SIZE=8000)
+    
+    # extra_modules['tunnel'] = TunnelandProbing(loaders, model, num_classes=NUM_CLASSES, optim_type=type_names['optim'], optim_params={'lr': 1e-2, 'weight_decay': 0.0},
+    #                                            reprs_hook=extra_modules['hooks_reprs'], epochs_probing=50)
     
     # extra_modules['tunnel_grads'] = TunnelGrad(loaders, model, cutoff=4000)
     # extra_modules['trace_fim'] = TraceFIM(held_out['x_held_out'], model, num_classes=NUM_CLASSES)
@@ -159,7 +162,7 @@ def objective(exp, epochs, lr, wd, lr_lambda):
     CLIP_VALUE = 0.0
     params_names = [n for n, p in model.named_parameters() if p.requires_grad]
     
-    logger_config = {'logger_name': 'tensorboard',
+    logger_config = {'logger_name': 'wandb',
                      'project_name': PROJECT_NAME,
                      'entity': ENTITY_NAME,
                      'hyperparameters': h_params_overall,
@@ -175,11 +178,11 @@ def objective(exp, epochs, lr, wd, lr_lambda):
     
     config.log_multi = 1#(T_max // epochs) // 10
     config.save_multi = 0#int((T_max // epochs) * 40)
-    # config.stiff_multi = (T_max // (window + epochs)) // 2
+    config.run_stats_multi = (T_max // epochs) // 2
     config.tunnel_multi = int((T_max // epochs) * 10)
     config.tunnel_grads_multi = int((T_max // epochs) * 10)
     config.fim_trace_multi = (T_max // epochs) // 2
-    config.run_stats_multi = (T_max // epochs) // 2
+    # config.stiff_multi = (T_max // (window + epochs)) // 2
     
     config.clip_value = CLIP_VALUE
     config.random_seed = RANDOM_SEED
@@ -206,7 +209,9 @@ def objective(exp, epochs, lr, wd, lr_lambda):
 
 if __name__ == "__main__":
     lr = float(sys.argv[1])
-    wd = 0.0#1e-4 * 1e-1 / lr
+    momentum = float(sys.argv[2])
+    is_wd = int(sys.argv[3])
+    wd = 1e-4 * 1e-1 / lr * is_wd
     lr_lambda = 1.0
     EPOCHS = 300
-    objective('just_run', EPOCHS, lr, wd, lr_lambda)
+    objective('just_run', EPOCHS, lr, wd, momentum, lr_lambda)
