@@ -114,7 +114,7 @@ class SDN(torch.nn.Module):
             loss_overall += 0 if ((i + 1) == len(logits) and self.is_model_frozen) else losses_i[0]
 
         evaluators[f'internal_classifier_loss/overall_loss____{"train"}'] = loss_overall.item()
-        evaluators[f'internal_classifier_acc/overall_acc____{"train"}'] = evaluators[f'internal_classifier_acc/{self.ic_idxs[i]}']
+        evaluators[f'internal_classifier_acc/overall_acc____{"train"}'] = evaluators[f'internal_classifier_acc/{self.ic_idxs[i]}____{"train"}']
 
         return loss_overall, evaluators
     

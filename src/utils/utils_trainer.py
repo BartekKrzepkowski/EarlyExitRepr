@@ -31,17 +31,33 @@ def adjust_evaluators(d1, dd2, denom, scope, phase):
     W przeciwnym przypadku dodaje scope, sprawdzając czy istnieje scope by upewnić się że doda go właściwie.
     '''
     for evaluator_key in dd2:
-        eval_key = str(evaluator_key).split('/')
-        if 'train' in evaluator_key or 'valid' in evaluator_key or 'test' in evaluator_key:
-            eval_key = '/'.join(eval_key[:-1]).split('_')
-            eval_key = '_'.join(eval_key[1:]) if eval_key[0] in {'running', 'epoch'} else '_'.join(eval_key)
-            d1[f'{scope}_{eval_key}/{phase}'] += dd2[evaluator_key] * denom
-        elif len(eval_key) == 1:
-            d1[f'{scope}_{eval_key[0]}/{phase}'] += dd2[evaluator_key] * denom
+        eval_key_split_1 = str(evaluator_key).split('/')
+        if len(eval_key_split_1) == 1:
+            d1[f'{scope}_{eval_key_split_1[0]}/{phase}'] += dd2[evaluator_key] * denom
         else:
-            eval_key = '/'.join(eval_key).split('_')
-            eval_key = '_'.join(eval_key[1:]) if eval_key[0] in {'running', 'epoch'} else '_'.join(eval_key)
-            d1[f'{scope}_{eval_key}'] += dd2[evaluator_key] * denom
+            if '____' not in eval_key_split_1[1]:
+                eval_key_split_1[1] += f'____{phase}'
+
+            eval_key_split_2 = eval_key_split_1[0].split('_')
+            if eval_key_split_2[0] in {'running', 'epoch'}:
+                eval_key_split_2 = [scope] + eval_key_split_2[1:]
+            else:
+                eval_key_split_2 = [scope] + eval_key_split_2
+            eval_key_split_1[0] = '_'.join(eval_key_split_2)
+            d1['/'.join(eval_key_split_1)] += dd2[evaluator_key] * denom
+        
+        
+        # eval_key = str(evaluator_key).split('/')
+        # if '____train' in evaluator_key or '____valid' in evaluator_key or '____test' in evaluator_key:
+        #     eval_key = '/'.join(eval_key[:-1]).split('_')
+        #     eval_key = '_'.join(eval_key[1:]) if eval_key[0] in {'running', 'epoch'} else '_'.join(eval_key)
+        #     d1[f'{scope}_{eval_key}/{phase}'] += dd2[evaluator_key] * denom
+        # elif len(eval_key) == 1:
+        #     d1[f'{scope}_{eval_key[0]}/{phase}'] += dd2[evaluator_key] * denom
+        # else:
+        #     eval_key = '/'.join(eval_key).split('_')
+        #     eval_key = '_'.join(eval_key[1:]) if eval_key[0] in {'running', 'epoch'} else '_'.join(eval_key)
+        #     d1[f'{scope}_{eval_key}'] += dd2[evaluator_key] * denom
     return d1
 
 
