@@ -10,7 +10,7 @@ from src.data.transforms import TRANSFORMS_NAME_MAP
 from src.utils.common import LOGGERS_NAME_MAP
 
 from src.modules.aux import TimerCPU
-from src.utils.utils_trainer import adjust_evaluators, adjust_evaluators_pre_log, create_paths, save_model
+from src.utils.utils_trainer import adjust_evaluators, adjust_counters, adjust_evaluators_pre_log, create_paths, save_model
 from src.utils.utils_optim import clip_grad_norm
 
 
@@ -158,14 +158,17 @@ class TrainerClassification:
             config (dict):
         """
         logging.info(f'Epoch: {self.epoch}, Phase: {phase}')
-
+        
+        counter = None
         running_assets = {
             'evaluators': defaultdict(float),
             'denom': 0.0,
+            'counter': counter
         }
         epoch_assets = {
             'evaluators': defaultdict(float),
             'denom': 0.0,
+            'counter': counter
         }
         loader_size = len(self.loaders[phase])
         progress_bar = tqdm(self.loaders[phase], desc=f'run_epoch: {phase}',
@@ -175,8 +178,9 @@ class TrainerClassification:
             x_true, y_true = data
             x_true, y_true = x_true.to(self.device), y_true.to(self.device)
             
+            loss, evaluators = self.model(x_true, y_true, phase)
+            
             if 'train' == phase:
-                loss, evaluators = self.model.run_train(x_true, y_true)
                 
                 # Backpropagate the loss to compute the gradients
                 loss.backward(retain_graph=True)
@@ -265,11 +269,17 @@ class TrainerClassification:
                 #     self.extra_modules['hooks_dead_relu'].write_to_tensorboard(self.global_step)
                 #     self.timer.stop('hooks_dead_relu')
             else:
-                evaluators, sample_exited_at = self.model.run_val(x_true, y_true)
+                evaluators, counter_of_exits, counter_of_exits_above_thr, counter_of_exits_not_above_thr = self.model.run_val(x_true, y_true, evaluators)
+                counter = {
+                    'counter_of_exits': counter_of_exits,
+                    'counter_of_exits_above_thr': counter_of_exits_above_thr,
+                    'counter_of_exits_not_above_thr': counter_of_exits_not_above_thr
+                    }
             
             step_assets = {
                 'evaluators': evaluators,
                 'denom': y_true.size(0),
+                'counter': counter
             }
             # ════════════════════════ logging ════════════════════════ #
             
@@ -293,6 +303,7 @@ class TrainerClassification:
                 self.log(running_assets, phase, 'running', progress_bar, self.global_step)
                 running_assets['evaluators'] = defaultdict(float)
                 running_assets['denom'] = 0.0
+                running_assets['counter'] = None
 
             if whether_epoch_end:
                 self.log(epoch_assets, phase, 'epoch', progress_bar, self.epoch)
@@ -316,6 +327,9 @@ class TrainerClassification:
 
         if self.lr_scheduler is not None and phase == 'train' and scope == 'running':
             self.logger.log_scalars({f'lr_scheduler': self.lr_scheduler.get_last_lr()[0]}, step)
+            
+        if scope == "epoch" and phase == 'train' and self.epoch % 10 == 0:
+            self.model.plot(evaluators_log, 'internal_classifier_acc_plots', f'____{"epoch"}____{phase}', self.logger)
 
 
     def update_assets(self, assets_target: Dict, assets_source: Dict, multiplier, scope, phase: str):
@@ -331,6 +345,9 @@ class TrainerClassification:
         assets_target['evaluators'] = adjust_evaluators(assets_target['evaluators'], assets_source['evaluators'],
                                                         multiplier, scope, phase)
         assets_target['denom'] += assets_source['denom']
+        if assets_source['counter'] is not None:
+            assets_target['counter'] = {name: defaultdict(int) for name in assets_source['counter']} if assets_target['counter'] is None else assets_target['counter']
+            assets_target['counter'] = adjust_counters(assets_target['counter'], assets_source['counter'])
         return assets_target
 
 
