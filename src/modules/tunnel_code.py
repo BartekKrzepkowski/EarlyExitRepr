@@ -2,9 +2,9 @@ import os
 import logging
 from abc import abstractmethod
 
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
-import matplotlib.pyplot as plt
 
 
 class BaseAnalysis:
@@ -91,14 +91,15 @@ class RepresentationsSpectra(BaseAnalysis):
         prefix = 'ranks_representations'
         postfix = f'____{scope}____{phase}'
         if len(self.representations) == 0:
-            logging.info(f'Number of matrices: {9991}')
+            # logging.info(f'Number of matrices: {9991}')
             self.collect_representations()
-        logging.info(f'self.MAX_REPR_SIZE: {self.MAX_REPR_SIZE}')
+        # logging.info(f'self.MAX_REPR_SIZE: {self.MAX_REPR_SIZE}')
         evaluators = {}
         for name, rep in self.representations.items():
             name_dict = f'{prefix}/{name}{postfix}'
             print(name_dict)
             rep = torch.cov(rep.T)
+            # rep = rep.T @ rep
             evaluators[name_dict] = torch.linalg.matrix_rank(rep).item()
             
         self.plot(evaluators, prefix, postfix)
@@ -112,6 +113,11 @@ class RepresentationsSpectra(BaseAnalysis):
         plot_name = f'{prefix}_plots/{postfix}'
         fig, axs = plt.subplots(1, 1, figsize=(10, 10))
         axs.plot(list(range(len(evaluators))), list(evaluators.values()), "o-")
+        # print(list(evaluators.keys()))
+        # Dodawanie tytułu i etykiet osi
+        axs.set_title("Rank Across Layers")  # Dodaj tytuł wykresu
+        axs.set_xlabel("Layer")  # Dodaj etykietę dla osi X
+        axs.set_ylabel("Represenation Rank")  # Dodaj etykietę dla osi Y
         plot_images = {plot_name: fig}
         self.logger.log_plots(plot_images)
         # plt.savefig(os.path.join(self.rpath, name + ".png"), dpi=500)

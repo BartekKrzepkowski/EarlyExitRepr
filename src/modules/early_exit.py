@@ -1,6 +1,7 @@
 import logging
-from collections import defaultdict
+from collections import defaultdict, Counter
 
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -43,15 +44,6 @@ class SDN(torch.nn.Module):
         
         num_classes = y.size(-1)
         self.nb_of_exits = i - 2  # "Możemy doczepiać heady do wszystkich prócz ostatniego wyjścia"
-        
-        # repr_i = None
-        # for i in range(self.nb_of_exits):
-        #     repr_i, _ = fg.send(repr_i)
-        #     if i in self.ic_idxs:
-        #         input_dims.append(repr_i.size(1))
-        
-        # _, logit_main = fg.send(repr_i)
-        # num_classes = logit_main.size(-1)
             
         self.internal_classifiers = torch.nn.ModuleList([StandardHead(in_channels, num_classes=num_classes, pool_size=4)
             for in_channels in input_dims]).to(self.device)
@@ -87,7 +79,8 @@ class SDN(torch.nn.Module):
     #     return loss_overall, evaluators
     
     
-    def run_train(self, x_true, y_true):
+    def forward(self, x_true, y_true, scope):
+        # TODO: confusion metric, inconsistency measure
         '''
         :param x_true: data input
         :param y_true: data label
@@ -109,24 +102,33 @@ class SDN(torch.nn.Module):
         loss_overall = 0.0
         for i, logit_i in enumerate(logits):
             losses_i = self.criterion_ic(logit_i, y_true)
-            evaluators[f'internal_classifier_loss/{self.ic_idxs[i]}____{"train"}'] = losses_i[1]['loss']
-            evaluators[f'internal_classifier_acc/{self.ic_idxs[i]}____{"train"}'] = losses_i[1]['acc']
+            evaluators[f'internal_classifier_loss/{self.ic_idxs[i]}____{scope}'] = losses_i[1]['loss']
+            evaluators[f'internal_classifier_acc/{self.ic_idxs[i]}____{scope}'] = losses_i[1]['acc']
             loss_overall += 0 if ((i + 1) == len(logits) and self.is_model_frozen) else losses_i[0]
 
-        evaluators[f'internal_classifier_loss/overall_loss____{"train"}'] = loss_overall.item()
-        evaluators[f'internal_classifier_acc/overall_acc____{"train"}'] = evaluators[f'internal_classifier_acc/{self.ic_idxs[i]}____{"train"}']
+        evaluators[f'internal_classifier_loss/overall_loss____{scope}'] = loss_overall.item()
+        evaluators[f'internal_classifier_acc/overall_acc____{scope}'] = evaluators[f'internal_classifier_acc/{self.ic_idxs[i]}____{scope}']
+        # unbounded score - needed to normalize
+        evaluators[f'ee_confusion_metric/kl_div____{scope}'] = sum(F.kl_div(F.softmax(logit_i, dim=1), F.softmax(y_true, dim=1)) for logit_i in logits)
 
         return loss_overall, evaluators
     
     
-    def run_val(self, x_true, y_true):
+    def run_val(self, x_true, y_true, evaluators):
+        # TODO: rozkład wyjśc, rozkład wyjść dla przykładów powyżej progu, rozkład wyjść do przykładów nie powyżej progu, liczba elementow poniżej progu
         # zbieraj confidence z tych które nie wyszły bo na końcu wybierzesz wyjście przy którym confidence był największy
         fg, repr_i = self.backbone.forward_generator(x_true), None
         self.sample_outputs = [torch.Tensor() for _ in range(x_true.size(0))]
         self.sample_exited_at = torch.zeros(x_true.size(0), dtype=torch.int) - 1
         self.max_confidence_exits = torch.zeros(x_true.size(0), dtype=torch.int) - 1
         self.max_confidences = torch.zeros(x_true.size(0)) - 1
+        
+        #TODO: zamień indeks heada na indeks warstwy
+        self.counter_of_exits = None
+        self.counter_of_exits_above_thr = None
+        self.counter_of_exits_not_above_thr = None
         head_idx = 0
+        
         for i in range(self.nb_of_exits):
             repr_i, _ = fg.send(repr_i) # output of i-th layer of backbone
             if i not in self.ic_idxs: continue
@@ -149,11 +151,10 @@ class SDN(torch.nn.Module):
         losses = self.criterion_ic(outputs, y_true)
         # acc = acc_metric(outputs, y_true)
 
-        evaluators = defaultdict(float)
-        evaluators[f'internal_classifier_loss/overall_loss____{"test"}'] = losses[1]['loss']
-        evaluators[f'internal_classifier_acc/overall_acc____{"test"}'] = losses[1]['acc']
+        evaluators[f'internal_classifier_loss/best_overall_loss____{"test"}'] = losses[1]['loss']
+        evaluators[f'internal_classifier_acc/best_overall_acc____{"test"}'] = losses[1]['acc']
 
-        return evaluators, self.sample_exited_at
+        return evaluators, self.counter_of_exits, self.counter_of_exits_above_thr, self.counter_of_exits_not_above_thr
     
     
     def find_exit(self, logit_i, head_idx, is_last):
@@ -201,7 +202,11 @@ class SDN(torch.nn.Module):
         if is_last:
             # logging(f"devices: {self.sample_exited_at.device.type}, {self.max_confidence_exits.device.type}, {unresolved_samples_mask.device.type}")
             unresolved_samples_mask = self.sample_exited_at == -1
-            self.sample_exited_at[unresolved_samples_mask] = self.max_confidence_exits[unresolved_samples_mask]
+            self.sample_exited_at[unresolved_samples_mask] = self.max_confidence_exits[unresolved_samples_mask]            
+            
+            self.counter_of_exits = dict(Counter(self.sample_exited_at.numpy()))
+            self.counter_of_exits_above_thr = dict(Counter(self.sample_exited_at[unresolved_samples_mask].numpy()))
+            self.counter_of_exits_not_above_thr = dict(Counter(self.sample_exited_at[~unresolved_samples_mask].numpy()))
             # exit_indices_global = exit_mask_global.nonzero().view(-1).tolist()
             # for j, k in enumerate(exit_indices_global):
             #     self.sample_outputs[k] = logit_i[j]
@@ -216,5 +221,34 @@ class SDN(torch.nn.Module):
     def entropy_rate(self, p):
         return 1 + torch.sum(p * torch.log(p), dim=1) / np.log(p.size(-1))
     
-    # def forward(self, x):
-    #     pass
+    def plot(self, evaluators, prefix, postfix, logger):
+        evaluators = {k:v for k,v in evaluators.items() if 'internal_classifier_acc' in k and 'overall' not in k and 'best' not in k}
+        plot_name = f'{prefix}_plots/{postfix}'
+        fig, axs = plt.subplots(1, 1, figsize=(10, 10))
+        
+        # Tworzenie wykresu
+        axs.plot(list(range(len(evaluators))), list(evaluators.values()), "o-")
+
+        # Dodawanie tytułu i etykiet osi
+        axs.set_title("Train Accuracy Across Layers")  # Dodaj tytuł wykresu
+        axs.set_xlabel("Layer")  # Dodaj etykietę dla osi X
+        axs.set_ylabel("Train Accuracy")  # Dodaj etykietę dla osi Y
+
+        plot_images = {plot_name: fig}
+        logger.log_plots(plot_images)
+
+        # Opcjonalnie: Zapisz wykres jako plik PNG
+        # plt.savefig(os.path.join(self.rpath, plot_name + ".png"), dpi=500)
+
+        plt.close()
+        
+        
+    def log_histograms(self, counters, logger):
+        import wandb
+        for name in counters:
+            histogram_data = []
+            for value, frequency in counters[name].items():
+                histogram_data.extend([value] * frequency)
+
+            # Logowanie histogramu
+            logger.log({"your_histogram_name": wandb.Histogram(histogram_data)})

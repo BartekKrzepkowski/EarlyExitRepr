@@ -73,6 +73,16 @@ def update_tensor(a, b):
     return c
 
 
+def adjust_counters(target, source):
+    for name in target:
+        for k in source[name]:
+            if k in target[name]:
+                target[name][k] += source[name][k]
+            else:
+                target[name][k] = source[name][k]
+                
+
+
 def load_model(model, path, device=None):
     if device is None:
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')

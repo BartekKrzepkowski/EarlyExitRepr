@@ -25,11 +25,12 @@ from src.modules.tunnel_code import RepresentationsSpectra
 from src.modules.early_exit import SDN
 
 
-def objective(exp, epochs, lr, wd, momentum, lr_lambda):
+def objective(exp, epochs, lr, wd, momentum, lr_lambda, checkpoint_path, phase1):
     # ════════════════════════ prepare general params ════════════════════════ #
 
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    epochs -= phase1
     NUM_CLASSES = 10
     RANDOM_SEED = 83
     
@@ -59,7 +60,7 @@ def objective(exp, epochs, lr, wd, momentum, lr_lambda):
                     'modify_resnet': True}
     model_params = {'model_config': model_config, 'num_classes': NUM_CLASSES, 'dataset_name': type_names['dataset']}
     
-    model = prepare_model(type_names['model'], model_params=model_params).to(device)
+    model = prepare_model(type_names['model'], model_params=model_params, checkpoint_path=checkpoint_path).to(device)
 
     
     # ════════════════════════ prepare criterion ════════════════════════ #
@@ -93,7 +94,7 @@ def objective(exp, epochs, lr, wd, momentum, lr_lambda):
     
     # ════════════════════════ prepare wandb params ════════════════════════ #
     
-    quick_name = 'early_exit_sdn'
+    quick_name = f'early_exit_sdn_phase1_{phase1}'
     ENTITY_NAME = 'gmum'
     PROJECT_NAME = 'NeuralCollapse'
     GROUP_NAME = f'{exp}, {type_names["optim"]}, {type_names["dataset"]}, {type_names["model"]}_lr_{LR}_momentum_{MOMENTUM}_wd_{WD}_lr_lambda_{LR_LAMBDA}'
@@ -124,14 +125,14 @@ def objective(exp, epochs, lr, wd, momentum, lr_lambda):
     
     # ════════════════════════ prepare extra modules ════════════════════════ #
     
-    model = SDN(model, criterion=criterion, ic_idxs=[0,1,2,3,4,5,6], confidence_threshold=0.8, is_model_frozen=False, prob_conf=True, sample=next(iter(loaders['train']))[0])
+    model_ee = SDN(model, criterion=criterion, ic_idxs=[0,1,2,3,4,5,6], confidence_threshold=0.8, is_model_frozen=False, prob_conf=True, sample=next(iter(loaders['train']))[0])
     extra_modules = defaultdict(lambda: None)
     # extra_modules['hooks_reprs'] = Hooks(model, logger=None, callback_type='gather_reprs', kwargs_callback={"cutoff": 4000})
     # extra_modules['hooks_reprs'].register_hooks([torch.nn.Conv2d, torch.nn.Linear])
     
     # extra_modules['run_stats'] = RunStats(model, optim)
     
-    # extra_modules['tunnel_code'] = RepresentationsSpectra(model, loader=loaders['test'], modules_list=[torch.nn.Conv2d, torch.nn.Linear], MAX_REPR_SIZE=8000)
+    extra_modules['tunnel_code'] = RepresentationsSpectra(model, loader=loaders['test'], modules_list=[torch.nn.Conv2d, torch.nn.Linear], MAX_REPR_SIZE=8000)
     
     # extra_modules['tunnel'] = TunnelandProbing(loaders, model, num_classes=NUM_CLASSES, optim_type=type_names['optim'], optim_params={'lr': 1e-2, 'weight_decay': 0.0},
     #                                            reprs_hook=extra_modules['hooks_reprs'], epochs_probing=50)
@@ -144,7 +145,7 @@ def objective(exp, epochs, lr, wd, momentum, lr_lambda):
     
     
     params_trainer = {
-        'model': model,
+        'model': model_ee,
         'criterion': criterion,
         'loaders': loaders,
         'optim': optim,
@@ -160,7 +161,7 @@ def objective(exp, epochs, lr, wd, momentum, lr_lambda):
 
 
     CLIP_VALUE = 0.0
-    params_names = [n for n, p in model.named_parameters() if p.requires_grad]
+    params_names = [n for n, p in model_ee.named_parameters() if p.requires_grad]
     
     logger_config = {'logger_name': 'wandb',
                      'project_name': PROJECT_NAME,
@@ -211,7 +212,9 @@ if __name__ == "__main__":
     lr = float(sys.argv[1])
     momentum = float(sys.argv[2])
     is_wd = int(sys.argv[3])
+    checkpoint_path = str(sys.argv[4])
+    phase1 = int(sys.argv[5])
     wd = 1e-4 * 1e-1 / lr * is_wd
     lr_lambda = 1.0
-    EPOCHS = 300
-    objective('just_run', EPOCHS, lr, wd, momentum, lr_lambda)
+    EPOCHS = 200
+    objective('just_run', EPOCHS, lr, wd, momentum, lr_lambda, checkpoint_path, phase1)
