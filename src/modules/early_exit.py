@@ -109,9 +109,14 @@ class SDN(torch.nn.Module):
         evaluators[f'internal_classifier_loss/overall_loss____{scope}'] = loss_overall.item()
         evaluators[f'internal_classifier_acc/overall_acc____{scope}'] = evaluators[f'internal_classifier_acc/{self.ic_idxs[i]}____{scope}']
         # unbounded score - needed to normalize
-        evaluators[f'ee_confusion_metric/kl_div____{scope}'] = sum(F.kl_div(F.softmax(logit_i, dim=1), F.softmax(y_true, dim=1)) for logit_i in logits)
+        p_final = F.softmax(logits[-1], dim=1)
+        kl_div_confusion = sum(F.kl_div(F.log_softmax(logit_i, dim=1), p_final, reduction='none').sum(axis=1) for logit_i in logits[:-1]).tolist()
+        evaluators[f'ee_confusion_metric_mean/kl_div____{scope}'] = sum(kl_div_confusion) / len(kl_div_confusion)
+        # if scope == 'test':
 
-        return loss_overall, evaluators
+        return loss_overall, evaluators, kl_div_confusion
+    
+        
     
     
     def run_val(self, x_true, y_true, evaluators):
@@ -243,12 +248,18 @@ class SDN(torch.nn.Module):
         plt.close()
         
         
-    def log_histograms(self, counters, logger):
+    def log_histograms(self, counters, prefix, postfix, logger, epoch):
         import wandb
+        hists = {}
         for name in counters:
+            plot_name = f'{prefix}_{name}/{postfix}_{epoch}'
             histogram_data = []
             for value, frequency in counters[name].items():
                 histogram_data.extend([value] * frequency)
 
             # Logowanie histogramu
-            logger.log({"your_histogram_name": wandb.Histogram(histogram_data)})
+            histogram_data = [[s] for s in histogram_data]
+            table = wandb.Table(data=histogram_data, columns=[name])
+            hists[plot_name] = wandb.plot.histogram(table, name, title=plot_name)
+            # wandb.Histogram(histogram_data)
+        logger.log_histograms(hists)

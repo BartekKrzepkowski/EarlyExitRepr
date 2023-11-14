@@ -27,9 +27,16 @@ class WandbLogger:
     def log_model(self, model, criterion, log, log_freq: int=1000, log_graph: bool=True):
         self.writer.watch(model, criterion, log=log, log_freq=log_freq, log_graph=log_graph)
 
-    def log_histogram(self, tag, tensor, global_step): # problem with numpy=1.24.0
-        tensor = tensor.view(-1, 1)
-        self.writer.log({tag: wandb.Histogram(tensor)}, step=global_step)
+    def log_histogram(self, lists): # problem with numpy=1.24.0
+        hists = {}
+        for tag in lists:
+            data = [[s] for s in lists[tag]]
+            table = wandb.Table(data=data, columns=[tag])
+            hists[tag] = wandb.plot.histogram(table, tag, title=tag)
+        self.writer.log(hists)
+
+    def log_histograms(self, hists): # problem with numpy=1.24.0
+        self.writer.log(hists)
 
     def log_scalars(self, evaluators, global_step=None):
         self.writer.log(evaluators)

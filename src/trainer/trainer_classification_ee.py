@@ -163,22 +163,26 @@ class TrainerClassification:
         running_assets = {
             'evaluators': defaultdict(float),
             'denom': 0.0,
-            'counter': counter
+            'counter': counter,
+            'confusion': []
         }
         epoch_assets = {
             'evaluators': defaultdict(float),
             'denom': 0.0,
-            'counter': counter
+            'counter': counter,
+            'confusion': []
         }
         loader_size = len(self.loaders[phase])
         progress_bar = tqdm(self.loaders[phase], desc=f'run_epoch: {phase}',
                             leave=False, position=1, total=loader_size, colour='red', disable=config.whether_disable_tqdm)
         self.global_step = self.epoch * loader_size
-        for i, data in enumerate(progress_bar):          
+        for i, data in enumerate(progress_bar):
+            if i > 2:
+                break      
             x_true, y_true = data
             x_true, y_true = x_true.to(self.device), y_true.to(self.device)
             
-            loss, evaluators = self.model(x_true, y_true, phase)
+            loss, evaluators, kl_div_confusion = self.model(x_true, y_true, phase)
             
             if 'train' == phase:
                 
@@ -279,7 +283,8 @@ class TrainerClassification:
             step_assets = {
                 'evaluators': evaluators,
                 'denom': y_true.size(0),
-                'counter': counter
+                'counter': counter,
+                'confusion': kl_div_confusion
             }
             # ════════════════════════ logging ════════════════════════ #
             
@@ -304,8 +309,9 @@ class TrainerClassification:
                 running_assets['evaluators'] = defaultdict(float)
                 running_assets['denom'] = 0.0
                 running_assets['counter'] = None
+                running_assets['confusion'] = []
 
-            if whether_epoch_end:
+            if whether_epoch_end or i == 2:
                 self.log(epoch_assets, phase, 'epoch', progress_bar, self.epoch)
 
             self.global_step += 1
@@ -328,8 +334,11 @@ class TrainerClassification:
         if self.lr_scheduler is not None and phase == 'train' and scope == 'running':
             self.logger.log_scalars({f'lr_scheduler': self.lr_scheduler.get_last_lr()[0]}, step)
             
-        if scope == "epoch" and phase == 'train' and self.epoch % 10 == 0:
-            self.model.plot(evaluators_log, 'internal_classifier_acc_plots', f'____{"epoch"}____{phase}', self.logger)
+        if scope == "epoch" and self.epoch % 10 == 0:
+            self.model.plot(evaluators_log, 'internal_classifier_acc_plots', f'____{scope}____{phase}', self.logger)
+            # self.logger.log_histogram({f'{scope}_confusion_kl_div_hist_{phase}': assets['confusion']})
+            # if assets['counter'] is not None:
+            #     self.model.log_histograms(assets['counter'], 'histogram', f'____{scope}____{phase}', self.logger, self.epoch)
 
 
     def update_assets(self, assets_target: Dict, assets_source: Dict, multiplier, scope, phase: str):
@@ -345,9 +354,10 @@ class TrainerClassification:
         assets_target['evaluators'] = adjust_evaluators(assets_target['evaluators'], assets_source['evaluators'],
                                                         multiplier, scope, phase)
         assets_target['denom'] += assets_source['denom']
+        assets_target['confusion'] += assets_source['confusion']
         if assets_source['counter'] is not None:
             assets_target['counter'] = {name: defaultdict(int) for name in assets_source['counter']} if assets_target['counter'] is None else assets_target['counter']
-            assets_target['counter'] = adjust_counters(assets_target['counter'], assets_source['counter'])
+            adjust_counters(assets_target['counter'], assets_source['counter'])
         return assets_target
 
 
